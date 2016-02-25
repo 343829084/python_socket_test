@@ -6,6 +6,7 @@ import pdb
 import select
 import Queue
 import common
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 
@@ -41,9 +42,10 @@ class Client(object):
                         time.sleep(0.05)
                         continue
 
-                    ret,msg_len,msg_code,msg_no,result,desc = common.decode(buf)
+                    ret,msg_len,msg_code,msg_no,result,utcStamp,desc = common.decode(buf)
                     if ret == 0:    #0表示消息是完整的
-                        print "%s,%i,%s,%s"%(msg_code,msg_no,result,desc)
+                        curDate = datetime.fromtimestamp(float(utcStamp))
+                        print "%s,%i,%s,%s,%s"%(msg_code,msg_no,result,curDate,desc)
                         buf = buf[msg_len:]
             except socket.error as msg:
                 print "except:%s, socket is closed by peer"%msg

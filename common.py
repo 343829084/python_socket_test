@@ -21,7 +21,7 @@ MsgDefDict = {
     ),
     'A101': (   # 登录回应
         ('Result', 1),
-        ('HeartBeatInt', 16),
+        ('UTCDate', 16),
         ('Description', 21),
     ),
 }
@@ -95,8 +95,8 @@ def decode(data):
 
         # -----以下为应答响应的消息----
         if msg_code == 'A101':  # 登录响应
-            result, desc = int(body_data[0].rstrip('\x00')), body_data[2].rstrip('\x00').decode('GBK').encode('utf8')
-            return (ret, msg_len, msg_code, msg_no, result, desc)
+            result, utcStamp, desc = int(body_data[0].rstrip('\x00')), body_data[1].rstrip('\x00').encode('utf8'), body_data[2].rstrip('\x00').decode('GBK').encode('utf8')
+            return (ret, msg_len, msg_code, msg_no, result, utcStamp, desc)
 
         elif msg_code == 'A201':   # 委托响应
             pass

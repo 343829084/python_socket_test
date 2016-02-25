@@ -6,6 +6,7 @@ import pdb
 import select
 import Queue
 import common
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 
@@ -67,7 +68,8 @@ def recvThreadFun():
                             flag = SUCCESS
                         else:
                             flag = FAILED
-                        retData = (str(result), str(heartBeatInt), flag)
+                        utcStamp = time.time()
+                        retData = (str(result), str(utcStamp), flag)
                         #send_msg_queues[sock].put(retData)
                         msg = common.encode('A101',msg_no,retData)
                         send_msg_queues[sock].put(msg)
