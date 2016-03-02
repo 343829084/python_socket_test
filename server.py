@@ -7,8 +7,18 @@ import select
 import Queue
 import common
 from datetime import datetime
+import json
 
-logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
+LOGGING_FORMAT = '[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d] %(message)s'
+DATE_FORMAT = '%y%m%d %H:%M:%S'
+logging.basicConfig(
+    level=logging.NOTSET,
+    format=LOGGING_FORMAT,
+    datefmt=DATE_FORMAT,
+    filename='log/test.log',
+    filemode='a'
+)
 
 SUCCESS = "login success"
 FAILED = "login failed"
@@ -57,10 +67,19 @@ def recvThreadFun():
             if data == '':
                 continue
 
-            ret,msg_len,msg_code,msg_no,result,userName,pwd,heartBeatInt = common.decode(data)
+            # ret,msg_len,msg_code,msg_no,result,userName,pwd,heartBeatInt
+            data_set = common.decode(data)
+            ret = data_set[0]
+            msg_len = data_set[1]
+            msg_code = data_set[2]
+            msg_no = data_set[3]
             print "recvThread msg_code=%s"%msg_code
             for case in switch(msg_code):
                 if case('S101'):     # 登录请求
+                    result = data_set[4]
+                    userName = data_set[5]
+                    pwd = data_set[6]
+                    heartBeatInt = data_set[7]
                     if ret == 0:
                         print("RecvMsg[%s,%i,%s,%s,%s,%s]"% (msg_code,msg_no,result,userName,pwd,heartBeatInt))
                         flag = ''
@@ -77,7 +96,12 @@ def recvThreadFun():
                         #sock.send(msg)
                     else:
                         print "Error: upack failed"
-                if case('S201'): pass
+                if case('S201'):    # 用来测试序列化
+                    result = data_set[4]
+                    if ret == 0:
+                        print(result)
+                        rebuild = json.loads(result, object_hook=lambda d: common.Student(d['name'], d['age'], d['score']))
+                        print(rebuild)
                 if case('S301'): pass
 
 
@@ -132,7 +156,9 @@ if __name__ == '__main__':
                     if msg_len <= len(buf[s]):
                         print "recv msg package"
                         recv_msg_queues[s].put(buf[s][:msg_len])
+                        logging.info('recv new msg[%s]', buf[s][:msg_len])
                         buf[s] = buf[s][msg_len:]
+
                         if s not in outputs:
                             outputs.append(s)
                     # Add output channel for response

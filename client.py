@@ -7,6 +7,7 @@ import select
 import Queue
 import common
 from datetime import datetime
+import json
 
 logging.basicConfig(level=logging.INFO)
 
@@ -63,10 +64,23 @@ class Client(object):
             self.socket.send(msg)
 
 
+    def sendJson(self, msg_code, data):
+        msg_no = 0
+        msg = common.encode(msg_code,msg_no,data)
+        self.socket.send(msg)
+
+
 if __name__ == '__main__':
     myClient = Client()
     myClient.connect()
     myClient.send()
+
+    #测试序列化传输
+    s = common.Student('Bob', 20, 88)
+    std_data = json.dumps(s, default=lambda obj: obj.__dict__)
+    print(std_data)
+    data = [std_data]
+    myClient.sendJson('S201',data)
     myClient.recv()
 
 

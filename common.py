@@ -19,6 +19,12 @@ MsgDefDict = {
         ('Pwd', 16),
         ('HeartBeatInt', 16),
     ),
+    'S201': (   # 数据请求，测试类的序列化
+        ('Result', 50),
+        #('Name', 4),
+        #('Age', 2),
+        #('Score', 4),
+    ),
     'A101': (   # 登录回应
         ('Result', 1),
         ('UTCDate', 16),
@@ -109,9 +115,23 @@ def decode(data):
             else:
                 result = 0
             return (ret, msg_len, msg_code, msg_no, result, userName, pwd, heartBeatInt)
-        elif msg_code == 'S201':    #委托
-            pass
+        elif msg_code == 'S201':    # 测试序列化student
+            print(body_data)
+            result = body_data[0].rstrip('\x00')
+            return (ret, msg_len, msg_code, msg_no, result)
         else:
             print "can't deal with the msg_code[%s]"% msg_code
             ret = 1
             return (ret, msg_len, msg_code)
+
+
+# 用来测试序列化
+class Student(object):
+    """docstring for ClassName"""
+    def __init__(self, name, age, score):
+        self.name = name
+        self.age = age
+        self.score = score
+
+    def __str__(self):
+        return 'Student object (%s, %s, %s)' % (self.name, self.age, self.score)
