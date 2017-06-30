@@ -4,7 +4,7 @@ import socket, threading, struct
 import hashlib
 import pdb
 import select
-import Queue
+import queue
 import common
 from datetime import datetime
 import json
@@ -28,12 +28,12 @@ class Client(object):
                 while 1:
                     data = ''
                     try:
-                        data = self.socket.recv(300)
-                    except socket.error, e:
+                        data = bytes.decode(self.socket.recv(300))
+                    except socket.error as e:
                         if e.errno == 11:
                             pass
                         else:
-                            print "socket error, Error code:", str(e[0]), ", ErrMsg=", e[1]
+                            print("socket error, Error code:", e)
                             self.socket.close()
                             #stop_flag = 0xf0f0
                             break
@@ -46,10 +46,10 @@ class Client(object):
                     ret,msg_len,msg_code,msg_no,result,utcStamp,desc = common.decode(buf)
                     if ret == 0:    #0表示消息是完整的
                         curDate = datetime.fromtimestamp(float(utcStamp))
-                        print "%s,%i,%s,%s,%s"%(msg_code,msg_no,result,curDate,desc)
+                        print("%s,%i,%s,%s,%s"%(msg_code,msg_no,result,curDate,desc))
                         buf = buf[msg_len:]
             except socket.error as msg:
-                print "except:%s, socket is closed by peer"%msg
+                print("except:%s, socket is closed by peer"%msg)
                 break
 
         self.socket.close()
@@ -57,9 +57,10 @@ class Client(object):
     def send(self):
         msg_no = 0
         for msg_code,userName,pwd,heartBeatInt in common.data_set:
-            data = [userName,pwd,heartBeatInt]
+            print("userName type=",type(userName.encode()))
+            data = [userName.encode(),pwd.encode(),heartBeatInt.encode()]
             msg = common.encode(msg_code,msg_no,data)
-            print 'sendMsg[%s]'% msg
+            print('sendMsg[%s]'% msg)
             msg_no += 1
             self.socket.send(msg)
 
@@ -79,7 +80,7 @@ if __name__ == '__main__':
     s = common.Student('Bob', 20, 88)
     std_data = json.dumps(s, default=lambda obj: obj.__dict__)
     print(std_data)
-    data = [std_data]
+    data = [std_data.encode()]
     myClient.sendJson('S201',data)
     myClient.recv()
 

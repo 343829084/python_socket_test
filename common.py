@@ -4,7 +4,7 @@ import socket, threading, struct
 import hashlib
 import pdb
 import select
-import Queue
+import queue
 
 MsgDefDict = {
     'Header': (
@@ -51,14 +51,17 @@ def msg_fmt_init():
         for field_def in msg_def:
             field_len = field_def[1]
             fmt_str += "%ds"%field_len
-        fmt_str_dict[msg_code] = fmt_str
+        fmt_str_dict[msg_code] = fmt_str #得到的结果为"6s4s6s16s128s" ,unpack按这个格式解包
 
 def encode(msg_code, msg_no, data):
     if {} == fmt_str_dict:
         msg_fmt_init()
     # body ----
     fmt_str = fmt_str_dict[msg_code]
-    body = struct.pack(fmt_str, *data)
+    print("encode data[0]=", type(data[0]))
+    #print(lambda x : x.decode() if not isinstance(x, bytes object) , for x in data)
+    
+    body = struct.pack(fmt_str, *tuple(data))
 
     # header----
     m = hashlib.md5()
@@ -66,12 +69,13 @@ def encode(msg_code, msg_no, data):
     md5cks = m.hexdigest().upper()
     fmt_str = fmt_str_dict['Header']
     header_data = (
-        str(headerLen+len(body)),
-        msg_code,
-        str(len(body)),
-        str(msg_no),
-        md5cks
+        str(headerLen+len(body)).encode("utf-8"),
+        msg_code.encode("utf-8"),
+        str(len(body)).encode("utf-8"),
+        str(msg_no).encode("utf-8"),
+        md5cks.encode("utf-8")
     )
+
     header = struct.pack(fmt_str, *header_data)
     return header+body
 
@@ -81,27 +85,30 @@ def decode(data):
     ret = 1
     result = 0
     if len(data) < headerLen:
-        print "Error: recv data len < headerLen\n"
+        print("Error: recv data len < headerLen\n")
         ret = 1
     else:
         ret = 0
 
-    header_data = struct.unpack(fmt_str_dict['Header'], data[:headerLen])
-    msg_len, msg_code, rec_len, msg_no, verifyData = int(header_data[0].rstrip('\x00')), header_data[1].rstrip('\x00'), int(header_data[2].rstrip('\x00')), int(header_data[3].rstrip('\x00')), header_data[4][:32]
+    header_data = struct.unpack(fmt_str_dict['Header'], data[:headerLen].encode('utf-8'))
+    
+    print(type(header_data[3]))
+    msg_len, msg_code, rec_len, msg_no, verifyData = int(header_data[0].decode().rstrip('\x00')), header_data[1].decode().rstrip('\x00'), int(header_data[2].decode().rstrip('\x00')), int(bytes.decode(header_data[3]).rstrip('\x00')), header_data[4][:32]
 
-    body_data = struct.unpack(fmt_str_dict[msg_code], data[headerLen:headerLen+rec_len])
+    body_data = struct.unpack(fmt_str_dict[msg_code], data[headerLen:headerLen+rec_len].encode('utf-8'))
     if len(data[headerLen:]) > 0:
         m = hashlib.md5()
-        m.update(data[headerLen:headerLen+rec_len])
-        if m.hexdigest().upper() != verifyData:
-            print "Error: verifyData failed"
+        m.update(data[headerLen:headerLen+rec_len].encode('utf-8'))
+        if m.hexdigest().upper() != verifyData.decode():
+            print("Error: verifyData failed .", "m.hex=", m.hexdigest().upper(), " verifyData=",  verifyData)
+
             ret = 1
         else:
             ret = 0
 
         # -----以下为应答响应的消息----
         if msg_code == 'A101':  # 登录响应
-            result, utcStamp, desc = int(body_data[0].rstrip('\x00')), body_data[1].rstrip('\x00').encode('utf8'), body_data[2].rstrip('\x00').decode('GBK').encode('utf8')
+            result, utcStamp, desc = int(bytes.decode(body_data[0]).rstrip('\x00')), bytes.decode(body_data[1]).rstrip('\x00'), bytes.decode(body_data[2]).rstrip('\x00')
             return (ret, msg_len, msg_code, msg_no, result, utcStamp, desc)
 
         elif msg_code == 'A201':   # 委托响应
@@ -109,7 +116,7 @@ def decode(data):
 
         #---------下面为请求的消息------------
         elif msg_code == 'S101':    # 登录请求
-            userName, pwd, heartBeatInt = body_data[0].rstrip('\x00'), body_data[1].rstrip('\x00'), int(body_data[2].rstrip('\x00'))
+            userName, pwd, heartBeatInt = bytes.decode(body_data[0]).rstrip('\x00'), body_data[1].decode().rstrip('\x00'), int(body_data[2].decode().rstrip('\x00'))
             if userName == 'userName':
                 result = 1
             else:
@@ -117,10 +124,10 @@ def decode(data):
             return (ret, msg_len, msg_code, msg_no, result, userName, pwd, heartBeatInt)
         elif msg_code == 'S201':    # 测试序列化student
             print(body_data)
-            result = body_data[0].rstrip('\x00')
+            result = body_data[0].decode().rstrip('\x00')
             return (ret, msg_len, msg_code, msg_no, result)
         else:
-            print "can't deal with the msg_code[%s]"% msg_code
+            print("can't deal with the msg_code[%s]"% msg_code)
             ret = 1
             return (ret, msg_len, msg_code)
 

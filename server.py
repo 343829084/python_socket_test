@@ -4,7 +4,7 @@ import socket, threading, struct
 import hashlib
 import pdb
 import select
-import Queue
+import queue
 import common
 from datetime import datetime
 import json
@@ -56,13 +56,13 @@ class switch(object):
 
 
 def recvThreadFun():
-    print "start recvThread"
+    print("start recvThread")
     while continue_flag:
         for sock in recvSockSet:
             data = ''
             try:
                 data = recv_msg_queues[sock].get_nowait()
-            except Queue.Empty:
+            except queue.Empty:
                 continue
             if data == '':
                 continue
@@ -73,7 +73,7 @@ def recvThreadFun():
             msg_len = data_set[1]
             msg_code = data_set[2]
             msg_no = data_set[3]
-            print "recvThread msg_code=%s"%msg_code
+            print("recvThread msg_code=%s"%msg_code)
             for case in switch(msg_code):
                 if case('S101'):     # 登录请求
                     result = data_set[4]
@@ -88,14 +88,14 @@ def recvThreadFun():
                         else:
                             flag = FAILED
                         utcStamp = time.time()
-                        retData = (str(result), str(utcStamp), flag)
+                        retData = (str(result).encode(), str(utcStamp).encode(), flag.encode())
                         #send_msg_queues[sock].put(retData)
                         msg = common.encode('A101',msg_no,retData)
                         send_msg_queues[sock].put(msg)
                         break
                         #sock.send(msg)
                     else:
-                        print "Error: upack failed"
+                        print("Error: upack failed")
                 if case('S201'):    # 用来测试序列化
                     result = data_set[4]
                     if ret == 0:
@@ -128,22 +128,22 @@ if __name__ == '__main__':
             if s is server:
                 # A "readable" socket is ready to accept a newSocket
                 newSocket, client_address = s.accept()
-                print "    newSocket from ", client_address
+                print("    newSocket from ", client_address)
                 newSocket.setblocking(0)
                 inputs.append(newSocket)
                 recvSockSet.append(newSocket)
-                recv_msg_queues[newSocket] = Queue.Queue(10)
-                send_msg_queues[newSocket] = Queue.Queue(10)
+                recv_msg_queues[newSocket] = queue.Queue(10)
+                send_msg_queues[newSocket] = queue.Queue(10)
                 buf[newSocket] = ''
             else:
                 data = ''
                 try:
-                    data = s.recv(300)
-                except socket.error, e:
+                    data = s.recv(300).decode('utf-8')
+                except socket.error as e:
                     if e.errno == 11:
                         pass
                     else:
-                        print "socket error, Error code:", str(e[0]), ", ErrMsg=", e[1]
+                        print("socket error, Error code:", e)
                         s.close()
 
                 if data != '' or buf[s] != '':
@@ -151,10 +151,11 @@ if __name__ == '__main__':
                     if (len(buf[s]) < common.headerLen):
                         continue
 
-                    header_data = struct.unpack(common.fmt_str_dict['Header'], buf[s][:common.headerLen])
-                    msg_len = int(header_data[0].rstrip('\x00'))
+                    header_data = struct.unpack(common.fmt_str_dict['Header'], (buf[s][:common.headerLen]).encode('utf-8'))#根据unpack的第一参数格式，将数据返回，header_data[0]表示msg_len
+                    
+                    msg_len = int(bytes.decode(header_data[0]).rstrip('\x00'))#收到的消息可能后面是以\0结尾的，但在python中字符是没有结束符的，所以要删除
                     if msg_len <= len(buf[s]):
-                        print "recv msg package"
+                        print("recv msg package")
                         recv_msg_queues[s].put(buf[s][:msg_len])
                         logging.info('recv new msg[%s]', buf[s][:msg_len])
                         buf[s] = buf[s][msg_len:]
@@ -167,17 +168,17 @@ if __name__ == '__main__':
             next_msg=''
             try:
                 next_msg = send_msg_queues[s].get_nowait()
-            except Queue.Empty:
+            except queue.Empty:
                 continue
                 #outputs.remove(s)
             #send_msg_queues[s].task_done()
             if next_msg != '':
-                print " sending " , next_msg , " to ", s.getpeername()
+                print(" sending " , next_msg , " to ", s.getpeername())
                 s.send(next_msg)
 
 
         for s in elist:
-            print " exception condition on ", s.getpeername()
+            print(" exception condition on ", s.getpeername())
             #stop listening for input on the connection
             inputs.remove(s)
             if s in outputs:
@@ -187,24 +188,5 @@ if __name__ == '__main__':
             #del message_queues[s]
 
     recvThread.join()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
