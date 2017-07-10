@@ -1,6 +1,7 @@
 #-*-coding:utf-8-*-
 import time,logging
 import socket, threading, struct
+import selectors #基于select模块实现的IO多路复用，建议大家使用
 import hashlib
 import pdb
 import select
@@ -8,185 +9,144 @@ import queue
 import common
 from datetime import datetime
 import json
+import zlib
+import _thread
 
 #logging.basicConfig(level=logging.INFO)
 LOGGING_FORMAT = '[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d] %(message)s'
 DATE_FORMAT = '%y%m%d %H:%M:%S'
 logging.basicConfig(
-    level=logging.NOTSET,
-    format=LOGGING_FORMAT,
-    datefmt=DATE_FORMAT,
-    filename='log/test.log',
-    filemode='a'
+    level = logging.NOTSET,
+    format = LOGGING_FORMAT,
+    datefmt = DATE_FORMAT,
+    filename = 'log/test.log',
+    filemode = 'a'
 )
 
-SUCCESS = "login success"
-FAILED = "login failed"
-
 # 是否停止线程处理
-continue_flag = 1
-
-#sockets from which we except to read
-inputs = []
-#sockets from which we expect to write
-outputs = []
-recvSockSet = []
-
-#Outgoing message queues (socket:Queue)
-recv_msg_queues = {}
-send_msg_queues = {}
-
-class switch(object):
-    def __init__(self, value):
-        self.value = value
-        self.fall = False
-    def __iter__(self):
-        """Return the match method once, then stop"""
-        yield self.match
-        raise StopIteration
-    def match(self, *args):
-        """Indicate whether or not to enter a case suite"""
-        if self.fall or not args:
-            return True
-        elif self.value in args: # changed for v1.5, see below
-            self.fall = True
-            return True
-        else:
-            return False
+stop_flag = 0
 
 
-def recvThreadFun():
-    print("start recvThread")
-    while continue_flag:
-        for sock in recvSockSet:
-            data = ''
+
+class Server:
+    def __init__(self, ip, port):
+        self._sock = socket.socket()
+        self._selector = selectors.DefaultSelector()
+        self._recv_queue = {}
+        self._send_queue = {}
+        self._client_no = 1
+        self._ip = ip
+        self._port = port
+        self._buf = {}
+        self._sock_list={}
+
+    def start(self):
+        sock = self._sock
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setblocking(0)
+        sock.bind((self._ip, self._port))
+        sock.listen(100)
+
+        selector = self._selector
+        self.add_handler(sock.fileno(), self._accept, selectors.EVENT_READ)
+
+        while True:
+            events = selector.select(1)
+            for key, event in events:
+                handler, data = key.data
+                if data:
+                    handler(**data)
+                else:
+                    handler()
+
+    def _accept(self):
+        while stop_flag != 1:
             try:
-                data = recv_msg_queues[sock].get_nowait()
-            except queue.Empty:
-                continue
-            if data == '':
-                continue
+                conn, address = self._sock.accept()
+            except OSError:
+                break
+            else:
+                conn.setblocking(0)
+                no = str(self._client_no)
+                self._sock_list[no] = conn
+                self._recv_queue[no] = queue.Queue()
+                self._send_queue[no] = queue.Queue()
+                self._buf[no] = ''
+                self.add_handler(self._sock_list[no], self._read, selectors.EVENT_READ, {'conn': conn, 'recv_queue': self._recv_queue[no], 'no':no})
+                #self.add_handler(self._sock_list[no], self._write, selectors.EVENT_WRITE, {'conn': conn})
+                _thread.start_new_thread(self._write, (self._sock_list[no], self._send_queue[no]))
 
-            # ret,msg_len,msg_code,msg_no,result,userName,pwd,heartBeatInt
-            data_set = common.decode(data)
-            ret = data_set[0]
-            msg_len = data_set[1]
-            msg_code = data_set[2]
-            msg_no = data_set[3]
-            print("recvThread msg_code=%s"%msg_code)
-            for case in switch(msg_code):
-                if case('S101'):     # 登录请求
-                    result = data_set[4]
-                    userName = data_set[5]
-                    pwd = data_set[6]
-                    heartBeatInt = data_set[7]
-                    if ret == 0:
-                        print("RecvMsg[%s,%i,%s,%s,%s,%s]"% (msg_code,msg_no,result,userName,pwd,heartBeatInt))
-                        flag = ''
-                        if result == 1:
-                            flag = SUCCESS
-                        else:
-                            flag = FAILED
-                        utcStamp = time.time()
-                        retData = (str(result).encode(), str(utcStamp).encode(), flag.encode())
-                        #send_msg_queues[sock].put(retData)
-                        msg = common.encode('A101',msg_no,retData)
-                        send_msg_queues[sock].put(msg)
-                        break
-                        #sock.send(msg)
-                    else:
-                        print("Error: upack failed")
-                if case('S201'):    # 用来测试序列化
-                    result = data_set[4]
-                    if ret == 0:
-                        print(result)
-                        rebuild = json.loads(result, object_hook=lambda d: common.Student(d['name'], d['age'], d['score']))
-                        print(rebuild)
-                if case('S301'): pass
+    def _read(self, conn, recv_queue, no):
+        try:
+            data = conn.recv(1024)
+        except socket.error as e:
+            if e.errno == 11:
+                pass
+            else:
+                print("socket error, Error code:", e)
+                conn.close()
+
+        if data != '' or self._buf[no] != '':
+            self._buf[no] += data.decode()
+            if (len(self._buf[no]) < common.headerLen):
+                return
+
+            header_data = struct.unpack(common.fmt_str_dict['Header'], self._buf[no][:common.headerLen].encode())#根据unpack的第一参数格式，将数据返回，header_data[0]表示msg_len
+            msg_len = int(header_data[0].decode().rstrip('\x00'))#收到的消息可能后面是以\0结尾的，但在python中字符是没有结束符的，所以要删除
+            check_sum = header_data[4].decode().rstrip('\x00')
+            if msg_len <= len(self._buf[no]):
+                data=self._buf[no][:msg_len]
+                if check_sum != zlib.crc32(data.encode()) & 0xffffffff:
+                    assert("error: check_sum is error")
+                self._recv_queue[no].put(self._buf[no][:msg_len])
+                print("recv msg package=", self._buf[no][:msg_len])
+                logging.info('recv new msg[%s]', self._buf[no][:msg_len])
+                self._buf[no] = self._buf[no][msg_len:]
+
+
+
+    def _write(self, conn, send_queue):
+        while stop_flag != 1:
+            if send_queue.empty() == True:
+                time.sleep(0.05)
+
+            while not send_queue.empty():
+                msg = send_queue.get()
+                print("send msg=", msg)
+                conn.sendall(msg)
+
+
+    def send_msg(self, msg_code, msg_no, data):
+        msg = common.encode(msg_code, msg_no, data)
+        while len(self._sock_list)<1:
+            time.sleep(0.05)
+        for no in self._sock_list.keys():
+            self._send_queue[no].put(msg)
+            print("write msg to send_queue;",msg)
+
+    def add_handler(self, fd, handler, event, data=None):
+        self._selector.register(fd, event, (handler, data))
+
+    def remove_handler(self, fd):
+        self._selector.unregister(fd)
+
+
+
+def send_test_msg(server):
+    msg_no = 1
+    for msg_code,userName,pwd,heartBeatInt in common.data_set:
+        data = [userName.encode(),pwd.encode(),heartBeatInt.encode()]
+        server.send_msg(msg_code, msg_no, data)
+        print("send_test_msg, ", msg_no)
+        msg_no += 1
+
+
 
 
 if __name__ == '__main__':
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setblocking(False)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR  , 1)
-    server.bind(('192.168.65.128', 9999))
-    server.listen(5)
-
-    recvThread = threading.Thread(target=recvThreadFun, args=())
-    recvThread.start()
-
     common.msg_fmt_init()
-    #A optional parameter for select is TIMEOUT
-    timeout = 0.5
-
-    inputs.append(server)
-    buf = {}
-    while 0xf0f0 != common.stop_flag:
-        rlist , wlist , elist = select.select(inputs, outputs, inputs, timeout)
-
-        for s in rlist :
-            if s is server:
-                # A "readable" socket is ready to accept a newSocket
-                newSocket, client_address = s.accept()
-                print("    newSocket from ", client_address)
-                newSocket.setblocking(0)
-                inputs.append(newSocket)
-                recvSockSet.append(newSocket)
-                recv_msg_queues[newSocket] = queue.Queue(10)
-                send_msg_queues[newSocket] = queue.Queue(10)
-                buf[newSocket] = ''
-            else:
-                data = ''
-                try:
-                    data = s.recv(300).decode('utf-8')
-                except socket.error as e:
-                    if e.errno == 11:
-                        pass
-                    else:
-                        print("socket error, Error code:", e)
-                        s.close()
-
-                if data != '' or buf[s] != '':
-                    buf[s] += data
-                    if (len(buf[s]) < common.headerLen):
-                        continue
-
-                    header_data = struct.unpack(common.fmt_str_dict['Header'], (buf[s][:common.headerLen]).encode('utf-8'))#根据unpack的第一参数格式，将数据返回，header_data[0]表示msg_len
-                    
-                    msg_len = int(bytes.decode(header_data[0]).rstrip('\x00'))#收到的消息可能后面是以\0结尾的，但在python中字符是没有结束符的，所以要删除
-                    if msg_len <= len(buf[s]):
-                        print("recv msg package")
-                        recv_msg_queues[s].put(buf[s][:msg_len])
-                        logging.info('recv new msg[%s]', buf[s][:msg_len])
-                        buf[s] = buf[s][msg_len:]
-
-                        if s not in outputs:
-                            outputs.append(s)
-                    # Add output channel for response
-
-        for s in wlist:
-            next_msg=''
-            try:
-                next_msg = send_msg_queues[s].get_nowait()
-            except queue.Empty:
-                continue
-                #outputs.remove(s)
-            #send_msg_queues[s].task_done()
-            if next_msg != '':
-                print(" sending " , next_msg , " to ", s.getpeername())
-                s.send(next_msg)
-
-
-        for s in elist:
-            print(" exception condition on ", s.getpeername())
-            #stop listening for input on the connection
-            inputs.remove(s)
-            if s in outputs:
-                outputs.remove(s)
-            s.close()
-            #Remove message queue
-            #del message_queues[s]
-
-    recvThread.join()
-
-
+    myServer = Server("192.168.65.128", 9999)
+    _thread.start_new_thread(myServer.start,())
+    send_test_msg(myServer)
+    while True:
+        time.sleep(0.01)

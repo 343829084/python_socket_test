@@ -28,7 +28,7 @@ class Client(object):
                 while 1:
                     data = ''
                     try:
-                        data = bytes.decode(self.socket.recv(300))
+                        data = bytes.decode(self.socket.recv(1024))
                     except socket.error as e:
                         if e.errno == 11:
                             pass
@@ -43,10 +43,9 @@ class Client(object):
                         time.sleep(0.05)
                         continue
 
-                    ret,msg_len,msg_code,msg_no,result,utcStamp,desc = common.decode(buf)
+                    ret,msg_len,msg_code,msg_no,result,userName,pwd,heartBeatInt = common.decode(buf)
                     if ret == 0:    #0表示消息是完整的
-                        curDate = datetime.fromtimestamp(float(utcStamp))
-                        print("%s,%i,%s,%s,%s"%(msg_code,msg_no,result,curDate,desc))
+                        print("recv msg: %s,%i,%s,%s,%s"%(msg_code,msg_no,result,userName, pwd))
                         buf = buf[msg_len:]
             except socket.error as msg:
                 print("except:%s, socket is closed by peer"%msg)
