@@ -98,6 +98,7 @@ class Server:
 
             header_data = struct.unpack(common.fmt_str_dict['Header'], self._buf[no][:common.headerLen].encode())#根据unpack的第一参数格式，将数据返回，header_data[0]表示msg_len
             msg_len = int(header_data[0].decode().rstrip('\x00'))#收到的消息可能后面是以\0结尾的，但在python中字符是没有结束符的，所以要删除
+            #fix it check_sum不是放在header中的，它是消息最后
             check_sum = header_data[4].decode().rstrip('\x00')
             if msg_len <= len(self._buf[no]):
                 data=self._buf[no][:msg_len]
@@ -163,7 +164,7 @@ class ConnectionMng:
         self._conn_map = {}
 
     def createConnection(self,tag, conn, server):
-        if not self._conn_map.has_key(tag):
+        if tag not in self._conn_map:
             new_conn = Connection(tag, conn, server)
             self._conn_map[tag] = new_conn
         return self._conn_map[tag]
@@ -175,33 +176,42 @@ class ConnectionMng:
             threading.Timer(kLogoutInterval, self._conn_map[key].close)
 
         self._conn_map.clear()
+
+    def findConn(self,tag):
+        if tag not in self._conn_map:
+            return kError
+        return kOk
     
 class Connection:
     def __init__(self,tag, conn, server):
         self._tag = tag
         self._conn = conn
+        self._server = server
+
+    def handleMsg(self,msg):
+        return kOk 
 
 
     def start(self):
         while stop_flag != 1:
-            if not server.get_msg(self._tag,msg):
+            msg = "" 
+            if self._server.get_msg(self._tag,msg):
                 handleMsg(msg)
+            else:
+                time.sleep(0.05)
 
     def close(self):
         self._conn.close()
 
-    def handleMsg(self,msg):
-        pass
-
-
+    
 def hanlde_connect_failed(conn, tag):
     pass
 
 def handle_connect_ok(conn_mng, conn, tag, server):
-    if (conn_mng.has_key(tag)):
+    if (conn_mng.findConn(tag)):
         return
     new_conn = conn_mng.createConnection(tag, conn, server)
-    new_conn.start()
+    _thread.start_new_thread(new_conn.start,())
     
 
 

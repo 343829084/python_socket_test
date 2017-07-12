@@ -97,6 +97,7 @@ def decode(data):
 
     body_data = struct.unpack(fmt_str_dict[msg_code], data[headerLen:headerLen+rec_len].encode('utf-8'))
     if len(data[headerLen:]) > 0:
+        #fix me checksum用common.py中的gen_checksum
         m = hashlib.md5()
         m.update(data[headerLen:headerLen+rec_len].encode('utf-8'))
         if m.hexdigest().upper() != verifyData.decode():
@@ -130,6 +131,13 @@ def decode(data):
             print("can't deal with the msg_code[%s]"% msg_code)
             ret = 1
             return (ret, msg_len, msg_code)
+
+def gen_checksum(msg):
+    cks =0
+    for ch in msg:
+        cks+=ord(ch)
+    return cks%256
+
 
 
 # 用来测试序列化
