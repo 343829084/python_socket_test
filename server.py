@@ -25,11 +25,12 @@ logging.basicConfig(
 
 # 是否停止线程处理
 stop_flag = 0
-
+kError = 0
+kOk = 1
 
 
 class Server:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, conn_mng, connect_ok):
         self._sock = socket.socket()
         self._selector = selectors.DefaultSelector()
         self._recv_queue = {}
@@ -39,6 +40,8 @@ class Server:
         self._port = port
         self._buf = {}
         self._sock_list={}
+        self._connect_ok = connect_ok
+        self._conn_mng = conn_mng
 
     def start(self):
         sock = self._sock
@@ -73,8 +76,10 @@ class Server:
                 self._send_queue[no] = queue.Queue()
                 self._buf[no] = ''
                 self.add_handler(self._sock_list[no], self._read, selectors.EVENT_READ, {'conn': conn, 'recv_queue': self._recv_queue[no], 'no':no})
+                print("accept: new sock tag=",no)
+                self._connect_ok(self._conn_mng, conn, no, self)
                 #self.add_handler(self._sock_list[no], self._write, selectors.EVENT_WRITE, {'conn': conn})
-                _thread.start_new_thread(self._write, (self._sock_list[no], self._send_queue[no]))
+                #_thread.start_new_thread(self._write, (self._sock_list[no], self._send_queue[no]))
 
     def _read(self, conn, recv_queue, no):
         try:
@@ -116,6 +121,13 @@ class Server:
                 conn.sendall(msg)
 
 
+    def get_msg(self, no, msg):
+        if self._recv_queue[no].empty():
+            return kError;
+        msg = self._recv_queue[no].get()
+        return kOk
+
+
     def send_msg(self, msg_code, msg_no, data):
         msg = common.encode(msg_code, msg_no, data)
         while len(self._sock_list)<1:
@@ -131,6 +143,9 @@ class Server:
         self._selector.unregister(fd)
 
 
+##*****************************下面的函数可以单独放到自己的类中,
+
+conn_mng = {}
 
 def send_test_msg(server):
     msg_no = 1
@@ -143,10 +158,56 @@ def send_test_msg(server):
 
 
 
+class ConnectionMng:
+    def __init__(self):
+        self._conn_map = {}
+
+    def createConnection(self,tag, conn, server):
+        if not self._conn_map.has_key(tag):
+            new_conn = Connection(tag, conn, server)
+            self._conn_map[tag] = new_conn
+        return self._conn_map[tag]
+
+
+    def clearAll(self):
+        for key in self._conn_map.keys:
+            #sendmsg(kLogout, logout)
+            threading.Timer(kLogoutInterval, self._conn_map[key].close)
+
+        self._conn_map.clear()
+    
+class Connection:
+    def __init__(self,tag, conn, server):
+        self._tag = tag
+        self._conn = conn
+
+
+    def start(self):
+        while stop_flag != 1:
+            if not server.get_msg(self._tag,msg):
+                handleMsg(msg)
+
+    def close(self):
+        self._conn.close()
+
+    def handleMsg(self,msg):
+        pass
+
+
+def hanlde_connect_failed(conn, tag):
+    pass
+
+def handle_connect_ok(conn_mng, conn, tag, server):
+    if (conn_mng.has_key(tag)):
+        return
+    new_conn = conn_mng.createConnection(tag, conn, server)
+    new_conn.start()
+    
+
+
 if __name__ == '__main__':
     common.msg_fmt_init()
-    myServer = Server("192.168.65.128", 9999)
-    _thread.start_new_thread(myServer.start,())
-    send_test_msg(myServer)
-    while True:
-        time.sleep(0.01)
+    conn_mng = ConnectionMng()
+    myServer = Server("192.168.65.128", 9999, conn_mng, handle_connect_ok)
+    myServer.start()
+    #send_test_msg(myServer)
